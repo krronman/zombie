@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 
 // 무대, 카메라, 화면 그리는 도구
 const scene = new THREE.Scene();
@@ -49,6 +50,32 @@ const keys = {};
 window.addEventListener("keydown", (e) => (keys[e.code] = true));
 window.addEventListener("keyup", (e) => (keys[e.code] = false));
 
+// 해골 병사 불러오기
+let skeleton = null;
+let mixer = null; // 움직임을 재생해 주는 도구
+
+const loader = new GLTFLoader();
+
+loader.load("models/skeleton.glb", (modelGltf) => {
+  skeleton = modelGltf.scene;
+  skeleton.position.set(5, 0, -5);
+  scene.add(skeleton);
+
+  // 움직임 파일을 따로 불러와서 해골에 붙이기
+  loader.load("models/move.glb", (animGltf) => {
+    console.log("사용 가능한 움직임:", animGltf.animations.map((a) => a.name));
+
+    mixer = new THREE.AnimationMixer(skeleton);
+
+    // 이름에 Walk가 들어간 움직임을 찾고, 없으면 첫 번째 것
+    const clip =
+      animGltf.animations.find((a) => a.name.includes("Walk")) ||
+      animGltf.animations[0];
+
+    mixer.clipAction(clip).play();
+  });
+});
+
 // 매 순간 실행되는 부분
 const clock = new THREE.Clock();
 function animate() {
@@ -68,6 +95,9 @@ function animate() {
   // 카메라가 플레이어를 뒤에서 위로 따라다님
   camera.position.set(player.position.x, 10, player.position.z + 12);
   camera.lookAt(player.position);
+
+  // 해골 움직임 재생
+  if (mixer) mixer.update(dt);
 
   renderer.render(scene, camera);
 }
