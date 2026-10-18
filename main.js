@@ -1,28 +1,81 @@
 import * as THREE from "three";
 
-// 무대(scene), 카메라, 화면 그리는 도구(renderer)
+// 무대, 카메라, 화면 그리는 도구
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x222222);
+scene.background = new THREE.Color(0x87ceeb);
 
-const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100);
-camera.position.z = 3;
+const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 200);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 document.body.appendChild(renderer.domElement);
 
-// 초록 상자
-const cube = new THREE.Mesh(
-  new THREE.BoxGeometry(1, 1, 1),
-  new THREE.MeshNormalMaterial()
-);
-scene.add(cube);
+// 조명 (없으면 새까맣게 보여요)
+scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+const sun = new THREE.DirectionalLight(0xffffff, 1.2);
+sun.position.set(10, 20, 10);
+scene.add(sun);
 
-// 매 순간 상자를 돌리며 다시 그리기
+// 바닥 (40m x 40m)
+const ground = new THREE.Mesh(
+  new THREE.PlaneGeometry(40, 40),
+  new THREE.MeshStandardMaterial({ color: 0x4a8f4a })
+);
+ground.rotation.x = -Math.PI / 2;
+scene.add(ground);
+
+// 사방 벽
+const wallMaterial = new THREE.MeshStandardMaterial({ color: 0x888888 });
+function addWall(x, z, width, depth) {
+  const wall = new THREE.Mesh(new THREE.BoxGeometry(width, 2, depth), wallMaterial);
+  wall.position.set(x, 1, z);
+  scene.add(wall);
+}
+addWall(0, -20, 40, 1);
+addWall(0, 20, 40, 1);
+addWall(-20, 0, 1, 40);
+addWall(20, 0, 1, 40);
+
+// 플레이어 (파란 상자)
+const player = new THREE.Mesh(
+  new THREE.BoxGeometry(1, 1, 1),
+  new THREE.MeshStandardMaterial({ color: 0x3366ff })
+);
+player.position.set(0, 0.5, 0);
+scene.add(player);
+
+// 키보드 입력 기억하기
+const keys = {};
+window.addEventListener("keydown", (e) => (keys[e.code] = true));
+window.addEventListener("keyup", (e) => (keys[e.code] = false));
+
+// 매 순간 실행되는 부분
+const clock = new THREE.Clock();
 function animate() {
   requestAnimationFrame(animate);
-  cube.rotation.x += 0.01;
-  cube.rotation.y += 0.01;
+  const dt = clock.getDelta();
+  const speed = 6;
+
+  if (keys["KeyW"] || keys["ArrowUp"]) player.position.z -= speed * dt;
+  if (keys["KeyS"] || keys["ArrowDown"]) player.position.z += speed * dt;
+  if (keys["KeyA"] || keys["ArrowLeft"]) player.position.x -= speed * dt;
+  if (keys["KeyD"] || keys["ArrowRight"]) player.position.x += speed * dt;
+
+  // 벽 밖으로 못 나가게 막기
+  player.position.x = THREE.MathUtils.clamp(player.position.x, -19, 19);
+  player.position.z = THREE.MathUtils.clamp(player.position.z, -19, 19);
+
+  // 카메라가 플레이어를 뒤에서 위로 따라다님
+  camera.position.set(player.position.x, 10, player.position.z + 12);
+  camera.lookAt(player.position);
+
   renderer.render(scene, camera);
 }
 animate();
+
+// 창 크기가 바뀌면 화면도 맞추기
+window.addEventListener("resize", () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
