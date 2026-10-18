@@ -15,7 +15,7 @@
     "nodes" : [
         {
             "mesh" : 0,
-            "name" : "Skeleton_Blade"
+            "name" : "Blade"
         }
     ],
     "materials" : [
@@ -130,7 +130,7 @@
     "buffers" : [
         {
             "byteLength" : 20056,
-            "uri" : "Skeleton_Blade.bin"
+            "uri" : "Blade.bin"
         }
     ]
 }
