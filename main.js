@@ -160,6 +160,14 @@ window.addEventListener("wheel", () => {
 let skeleton = null;
 let mixer = null;
 let walkAction = null;
+let attackAction = null;
+
+// 해골 공격 상태
+let skeletonAttacking = false;
+let attackElapsed = 0;
+let attackHitDone = false;
+let attackDuration = 1;
+let attackHitTime = 0.5;
 
 const loader = new GLTFLoader();
 
@@ -168,19 +176,34 @@ loader.load("models/skeleton.glb", (modelGltf) => {
   skeleton.position.set(8, 0, -8);
   scene.add(skeleton);
 
-  loader.load("models/move.glb", (animGltf) => {
-    console.log("사용 가능한 움직임:", animGltf.animations.map((a) => a.name));
+  mixer = new THREE.AnimationMixer(skeleton);
 
-    mixer = new THREE.AnimationMixer(skeleton);
-    const clip =
-      animGltf.animations.find((a) => a.name.includes("Walk")) ||
-      animGltf.animations[0];
-
+  // 걷기 움직임
+  loader.load("models/move.glb", (g) => {
+    console.log("걷기 파일 움직임:", g.animations.map((a) => a.name));
+    const clip = g.animations.find((a) => a.name.includes("Walk")) || g.animations[0];
     walkAction = mixer.clipAction(clip);
     walkAction.play();
   });
+
+  // 공격 움직임
+  loader.load("models/combat.glb", (g) => {
+    const clip =
+      g.animations.find((a) => a.name === "Melee_1H_Attack_Chop") || g.animations[0];
+    attackAction = mixer.clipAction(clip);
+    attackAction.setLoop(THREE.LoopOnce, 1); // 한 번만 재생
+    attackDuration = clip.duration;
+    attackHitTime = clip.duration * 0.45;    // 모션의 45% 지점에서 피해가 들어감
+  });
 });
 
+function startSkeletonAttack() {
+  skeletonAttacking = true;
+  attackElapsed = 0;
+  attackHitDone = false;
+  if (walkAction) walkAction.stop();
+  attackAction.reset().play();
+}
 const SKELETON_SPEED = 2.5;   // 해골 속도 (플레이어는 6이라 도망칠 수 있어요)
 const STOP_DISTANCE = 1.5;    // 이만큼 가까워지면 멈춤
 // ===== 해골 체력 / 공격 / 리스폰 =====
@@ -203,6 +226,8 @@ function respawnSkeleton() {
   skeleton.position.set(x, 0, z);
   skeletonHp = SKELETON_MAX_HP;
   attackTimer = 0;
+  skeletonAttacking = false;
+  if (attackAction) attackAction.stop();
 }
 
 // 맞았을 때 잠깐 빨갛게 번쩍
@@ -325,23 +350,22 @@ function animate() {
 
     skeleton.rotation.y = Math.atan2(dx, dz); // 항상 플레이어를 바라보기
 
-    if (dist > STOP_DISTANCE) {
+    if (skeletonAttacking) {
+      // 공격 모션 재생 중: 제자리에서 휘두름
+      attackElapsed += dt;
+      if (!attackHitDone && attackElapsed >= attackHitTime) {
+        attackHitDone = true;
+        if (dist <= ATTACK_RANGE + 0.5) damagePlayer(ATTACK_DAMAGE); // 그새 도망갔으면 빗나감
+      }
+      if (attackElapsed >= attackDuration) skeletonAttacking = false;
+    } else if (dist <= ATTACK_RANGE && attackAction) {
+      startSkeletonAttack(); // 가까우면 공격 시작 (끝나도 아직 가까우면 계속 공격)
+    } else if (dist > STOP_DISTANCE) {
       skeleton.position.x += (dx / dist) * SKELETON_SPEED * dt;
       skeleton.position.z += (dz / dist) * SKELETON_SPEED * dt;
-      if (walkAction && !walkAction.isRunning()) walkAction.reset().play(); // 걷기 시작
+      if (walkAction && !walkAction.isRunning()) walkAction.reset().play();
     } else if (walkAction) {
-      walkAction.stop(); // 걷기를 끄고 기본 자세로
-    }
-
-    // 가까우면 1초마다 공격
-    if (dist <= ATTACK_RANGE) {
-      attackTimer += dt;
-      if (attackTimer >= ATTACK_COOLDOWN) {
-        attackTimer = 0;
-        damagePlayer(ATTACK_DAMAGE);
-      }
-    } else {
-      attackTimer = 0;
+      walkAction.stop();
     }
 
     skeleton.position.x = THREE.MathUtils.clamp(skeleton.position.x, -19, 19);
