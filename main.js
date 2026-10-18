@@ -103,20 +103,16 @@ renderer.domElement.addEventListener("contextmenu", (e) => e.preventDefault()); 
 renderer.domElement.addEventListener("mousedown", (e) => {
   if (e.button === 2) dragging = true;
 });
-window.addEventListener("mousemove", (e) => {
-  const locked = document.pointerLockElement === renderer.domElement;
-  // 우클릭 중이거나, Shift 락이거나, 1인칭이면 마우스만 움직여도 시점 회전
-  if (!(dragging || locked || shiftLock || isFirstPerson())) return;
-  yaw -= e.movementX * 0.005;
-  pitch += e.movementY * 0.005;
-});
-window.addEventListener("blur", () => (dragging = false));
 
 window.addEventListener("mousemove", (e) => {
-  if (!dragging) return;
+  const rightHeld = (e.buttons & 2) !== 0; // 지금 실제로 우클릭이 눌려 있는지
+  if (!(rightHeld || shiftLock || isFirstPerson())) return;
   yaw -= e.movementX * 0.005;
   pitch += e.movementY * 0.005;
 });
+
+window.addEventListener("blur", () => (dragging = false));
+
 
 window.addEventListener(
   "wheel",
@@ -145,7 +141,7 @@ window.addEventListener("keydown", (e) => {
   if ((e.code === "ShiftLeft" || e.code === "ShiftRight") && !e.repeat) {
     shiftLock = !shiftLock;
     if (shiftLock) tryLock();
-    else if (!isFirstPerson()) document.exitPointerLock();
+    else if (document.pointerLockElement && !isFirstPerson()) document.exitPointerLock();
   }
 });
 
@@ -229,7 +225,7 @@ hand.position.set(-0.45, 0.8, 0.9);   // 오른쪽, 가슴 높이, 약간 앞
 swordPivot.add(hand);
 scene.add(swordPivot);
 
-loader.load("models/Blade.glb", (g) => {
+loader.load("models/Blade.gltf", (g) => {
   const swordModel = g.scene;
   swordModel.scale.setScalar(1);        // 너무 크거나 작으면 이 숫자를 바꾸세요
   swordModel.rotation.x = Math.PI / 2;  // 칼날이 앞쪽을 향하게 하는 값
@@ -332,9 +328,9 @@ function animate() {
     if (dist > STOP_DISTANCE) {
       skeleton.position.x += (dx / dist) * SKELETON_SPEED * dt;
       skeleton.position.z += (dz / dist) * SKELETON_SPEED * dt;
-      if (walkAction) walkAction.paused = false;
+      if (walkAction && !walkAction.isRunning()) walkAction.reset().play(); // 걷기 시작
     } else if (walkAction) {
-      walkAction.paused = true;
+      walkAction.stop(); // 걷기를 끄고 기본 자세로
     }
 
     // 가까우면 1초마다 공격
