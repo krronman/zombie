@@ -203,14 +203,17 @@ function startSkeletonAttack() {
   attackElapsed = 0;
   attackHitDone = false;
   attackAction.reset().play();
-  if (walkAction) attackAction.crossFadeFrom(walkAction, 0.15, false); // 걷기에서 부드럽게 전환
+  // 걷기가 아직 켜져 있을 때만 부드럽게 섞음 (없으면 기본 자세가 비쳐 보임)
+  if (walkAction && walkAction.enabled) attackAction.crossFadeFrom(walkAction, 0.15, false);
 }
 
 function startWalking() {
   if (!walkAction) return;
   walkAction.reset().play();
-  if (attackAction) walkAction.crossFadeFrom(attackAction, 0.15, false); // 공격에서 부드럽게 전환
+  // 공격 동작이 아직 켜져 있을 때만 부드럽게 섞음
+  if (attackAction && attackAction.enabled) walkAction.crossFadeFrom(attackAction, 0.15, false);
 }
+
 const SKELETON_SPEED = 2.5;   // 해골 속도 (플레이어는 6이라 도망칠 수 있어요)
 const STOP_DISTANCE = 1.5;    // 이만큼 가까워지면 멈춤
 // ===== 해골 체력 / 공격 / 리스폰 =====
