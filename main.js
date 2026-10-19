@@ -267,6 +267,7 @@ const GRAVITY = 25;        // 중력 (클수록 빨리 떨어짐)
 let playerMixer = null;
 const pActions = {};       // idle, run, attack, block, jumpStart, jumpIdle
 let pCurrent = null;       // 지금 재생 중인 동작
+let shieldModel = null;
 let swingT = -1;           // 0~1: 휘두르는 진행도, -1이면 휘두르는 중이 아님
 let swingHit = false;
 let swingDuration = 0.7;
@@ -361,7 +362,11 @@ loader.load("models/Knight.glb", (g) => {
   const handL = findBone(knight, "handslot.l");
   if (!handR || !handL) console.warn("손 뼈를 못 찾음", handR, handL);
   loader.load("models/sword_1handed.gltf", (s) => (handR || knight).add(s.scene));
-  loader.load("models/shield_badge.gltf", (s) => (handL || knight).add(s.scene));
+  loader.load("models/shield_badge.gltf", (s) => {
+    shieldModel = s.scene;
+    shieldModel.rotation.z = -Math.PI / 2; // 평소엔 똑바로 세운 각도
+    (handL || knight).add(shieldModel);
+  });
 
   // 움직임
   loadClips("models/Rig_Medium_General.glb", { idle: "Idle_A" }, (key, clip) => {
@@ -464,6 +469,11 @@ function updateSword(dt) {
     else if (!onGround) playerPlay(airTime > 0.3 ? pActions.jumpIdle : pActions.jumpStart);
     else playerPlay(move.lengthSq() > 0 ? pActions.run : pActions.idle);
   }
+    // 방패 각도: 평소엔 똑바로, 방어/공격 동작 중엔 원래 각도로 부드럽게 전환
+  if (shieldModel) {
+    const target = isBlocking() || swingT >= 0 ? 0 : -Math.PI / 2;
+    shieldModel.rotation.z += (target - shieldModel.rotation.z) * (1 - Math.exp(-14 * dt));
+  }
 
   if (playerMixer) playerMixer.update(dt);
 }
@@ -486,18 +496,17 @@ function animate() {
   if (keys["KeyD"] || keys["ArrowRight"]) move.add(right);
   if (keys["KeyA"] || keys["ArrowLeft"]) move.sub(right);
 
-  const faceCamera = shiftLock || isFirstPerson() || isBlocking();
+  const faceCamera = shiftLock || isFirstPerson();
   if (move.lengthSq() > 0) {
     move.normalize();
-    player.position.addScaledVector(move, (isBlocking() ? 3 : 6) * dt); // 방어 중엔 느리게
-    if (!faceCamera) turnPlayerTo(Math.atan2(move.x, move.z), dt);       // 가는 방향으로 부드럽게 회전
+    player.position.addScaledVector(move, (isBlocking() ? 6 * 0.2 : 6) * dt); // 방어 중엔 80% 감소
+    if (!faceCamera && !isBlocking()) turnPlayerTo(Math.atan2(move.x, move.z), dt); // 방어 중엔 방향 고정
   }
 
   player.position.x = THREE.MathUtils.clamp(player.position.x, -19, 19);
   player.position.z = THREE.MathUtils.clamp(player.position.z, -19, 19);
     // Shift 락이나 1인칭이면 캐릭터가 항상 카메라가 보는 쪽을 향함
   if (shiftLock || isFirstPerson()) player.rotation.y = yaw + Math.PI;  // 바로 맞춤
-  else if (isBlocking()) turnPlayerTo(yaw + Math.PI, dt, 18);           // 방어 중엔 부드럽게 카메라 쪽으로
   
   updateSword(dt);
 
@@ -514,9 +523,8 @@ function animate() {
       attackElapsed += dt;
       if (!attackHitDone && attackElapsed >= attackHitTime) {
         attackHitDone = true;
-        if (dist <= ATTACK_RANGE + 0.5) {
-          if (blocksAttackFrom(skeleton.position.x, skeleton.position.z)) onBlocked(); // 방패로 막음
-          else damagePlayer(ATTACK_DAMAGE);
+        if (dist <= ATTACK_RANGE + 0.25 && !blocksAttackFrom(skeleton.position.x, skeleton.position.z)) {
+          damagePlayer(ATTACK_DAMAGE); // 방패로 막으면 피해 없음
         }
       }
       if (attackElapsed >= attackDuration) skeletonAttacking = false;
