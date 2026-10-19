@@ -257,17 +257,69 @@ function restoreSkeletonGlow() {
   originalEmissive.forEach((color, m) => m.emissive.copy(color));
 }
 
-// ===== 기사 캐릭터 + 검 + 움직임 =====
+// ===== 기사 캐릭터 + 검 + 방패 + 움직임 =====
 const ATTACK_SPEED = 1.6;  // 공격 모션 배속 (클수록 빠르게 휘두름)
 const SWORD_REACH = 2.4;   // 검이 닿는 거리
 const SWORD_DAMAGE = 25;   // 해골 체력 50이라 2번 때리면 처치
+const JUMP_SPEED = 8;      // 점프 힘 (클수록 높이 뜀)
+const GRAVITY = 25;        // 중력 (클수록 빨리 떨어짐)
 
 let playerMixer = null;
-const pActions = {};       // idle(대기), run(달리기), attack(공격)
+const pActions = {};       // idle, run, attack, block, jumpStart, jumpIdle
 let pCurrent = null;       // 지금 재생 중인 동작
 let swingT = -1;           // 0~1: 휘두르는 진행도, -1이면 휘두르는 중이 아님
 let swingHit = false;
 let swingDuration = 0.7;
+
+// 점프 상태
+let vy = 0;
+let onGround = true;
+let airTime = 0;
+
+// 방어 상태 (우클릭을 누르고 있는 동안)
+let blockHeld = false;
+window.addEventListener("mousedown", (e) => { if (e.button === 2) blockHeld = true; });
+window.addEventListener("mouseup", (e) => { if (e.button === 2) blockHeld = false; });
+window.addEventListener("blur", () => (blockHeld = false));
+window.addEventListener("keydown", (e) => { if (e.code === "Space") e.preventDefault(); });
+
+function isBlocking() {
+  return blockHeld && swingT < 0; // 휘두르는 중에는 방어 안 함
+}
+
+// "막기!" 글자
+const blockMsg = document.createElement("div");
+blockMsg.textContent = "막기!";
+Object.assign(blockMsg.style, {
+  position: "fixed", left: "50%", top: "35%", transform: "translateX(-50%)",
+  color: "#fff", font: "bold 28px sans-serif", textShadow: "0 2px 6px #000",
+  opacity: "0", transition: "opacity 0.25s", pointerEvents: "none", zIndex: "10",
+});
+document.body.appendChild(blockMsg);
+let blockMsgTimer = null;
+function onBlocked() {
+  blockMsg.style.opacity = "1";
+  clearTimeout(blockMsgTimer);
+  blockMsgTimer = setTimeout(() => (blockMsg.style.opacity = "0"), 400);
+}
+
+// 공격한 쪽이 내 정면(±60도) 안에 있고 방어 중이면 막음
+function blocksAttackFrom(x, z) {
+  if (!isBlocking()) return false;
+  const dx = x - player.position.x;
+  const dz = z - player.position.z;
+  const dist = Math.hypot(dx, dz) || 1;
+  const fx = Math.sin(player.rotation.y);
+  const fz = Math.cos(player.rotation.y);
+  return (dx * fx + dz * fz) / dist > 0.5;
+}
+
+// 캐릭터를 목표 각도로 부드럽게 돌리기 (rate가 클수록 빨리 돎)
+function turnPlayerTo(target, dt, rate = 12) {
+  let diff = target - player.rotation.y;
+  diff = Math.atan2(Math.sin(diff), Math.cos(diff)); // 가장 가까운 회전 방향
+  player.rotation.y += diff * (1 - Math.exp(-rate * dt));
+}
 
 // 동작 바꾸기 (앞 동작이 켜져 있을 때만 부드럽게 섞음 → T자 방지)
 function playerPlay(next) {
@@ -287,12 +339,14 @@ function findBone(root, name) {
   return found;
 }
 
-// 파일에서 이름이 맞는 움직임 하나 꺼내기
-function loadClip(file, clipName, onLoad) {
+// 파일 하나에서 필요한 움직임 여러 개 꺼내기
+function loadClips(file, wanted, onLoad) {
   loader.load(file, (a) => {
-    const clip = a.animations.find((c) => c.name === clipName);
-    if (clip) onLoad(clip);
-    else console.warn("움직임을 못 찾음:", clipName, a.animations.map((c) => c.name));
+    for (const key in wanted) {
+      const clip = a.animations.find((c) => c.name === wanted[key]);
+      if (clip) onLoad(key, clip);
+      else console.warn("움직임을 못 찾음:", wanted[key], a.animations.map((c) => c.name));
+    }
   });
 }
 
@@ -302,32 +356,46 @@ loader.load("models/Knight.glb", (g) => {
   player.add(knight);
   playerMixer = new THREE.AnimationMixer(knight);
 
-  // 검을 오른손 슬롯(handslot.r)에 붙이기
-  const handBone = findBone(knight, "handslot.r");
-  if (!handBone) console.warn("오른손 뼈를 못 찾음");
-  loader.load("models/sword_1handed.gltf", (s) => {
-    (handBone || knight).add(s.scene);
-  });
+  // 검은 오른손, 방패는 왼손 슬롯에 붙이기
+  const handR = findBone(knight, "handslot.r");
+  const handL = findBone(knight, "handslot.l");
+  if (!handR || !handL) console.warn("손 뼈를 못 찾음", handR, handL);
+  loader.load("models/sword_1handed.gltf", (s) => (handR || knight).add(s.scene));
+  loader.load("models/shield_badge.gltf", (s) => (handL || knight).add(s.scene));
 
-  // 움직임 3종
-  loadClip("models/Rig_Medium_General.glb", "Idle_A", (clip) => {
-    pActions.idle = playerMixer.clipAction(clip);
+  // 움직임
+  loadClips("models/Rig_Medium_General.glb", { idle: "Idle_A" }, (key, clip) => {
+    pActions[key] = playerMixer.clipAction(clip);
     playerPlay(pActions.idle);
   });
-  loadClip("models/Rig_Medium_MovementBasic.glb", "Running_A", (clip) => {
-    pActions.run = playerMixer.clipAction(clip);
-  });
-  loadClip("models/combat.glb", "Melee_1H_Attack_Chop", (clip) => {
-    pActions.attack = playerMixer.clipAction(clip);
-    pActions.attack.setLoop(THREE.LoopOnce, 1);
-    pActions.attack.clampWhenFinished = true;
-    pActions.attack.timeScale = ATTACK_SPEED;
-    swingDuration = clip.duration / ATTACK_SPEED;
+  loadClips(
+    "models/Rig_Medium_MovementBasic.glb",
+    { run: "Running_A", jumpStart: "Jump_Start", jumpIdle: "Jump_Idle" },
+    (key, clip) => {
+      const act = playerMixer.clipAction(clip);
+      pActions[key] = act;
+      if (key === "jumpStart") {
+        act.setLoop(THREE.LoopOnce, 1);
+        act.clampWhenFinished = true;
+        act.timeScale = 2; // 점프 시작 동작은 빠르게
+      }
+    }
+  );
+  loadClips("models/combat.glb", { attack: "Melee_1H_Attack_Chop", block: "Melee_Block" }, (key, clip) => {
+    const act = playerMixer.clipAction(clip);
+    pActions[key] = act;
+    act.setLoop(THREE.LoopOnce, 1);
+    act.clampWhenFinished = true; // 끝나면 마지막 자세 유지 (방어 자세 유지용)
+    if (key === "attack") {
+      act.timeScale = ATTACK_SPEED;
+      swingDuration = clip.duration / ATTACK_SPEED;
+    }
+    if (key === "block") act.timeScale = 1.5; // 방패를 빨리 듦
   });
 });
 
 function startSwing() {
-  if (swingT >= 0 || !pActions.attack) return;
+  if (swingT >= 0 || blockHeld || !pActions.attack) return;
   swingT = 0;
   swingHit = false;
   const atk = pActions.attack;
@@ -343,7 +411,28 @@ window.addEventListener("mousedown", (e) => {
   if (isFirstPerson()) tryLock();
 });
 
+// 점프 (스페이스바)
+function updateJump(dt) {
+  if (keys["Space"] && onGround && !blockHeld) {
+    vy = JUMP_SPEED;
+    onGround = false;
+    airTime = 0;
+  }
+  if (!onGround) {
+    vy -= GRAVITY * dt;
+    player.position.y += vy * dt;
+    airTime += dt;
+    if (player.position.y <= 0) {
+      player.position.y = 0;
+      vy = 0;
+      onGround = true;
+    }
+  }
+}
+
 function updateSword(dt) {
+  updateJump(dt);
+
   if (swingT >= 0) {
     swingT += dt / swingDuration;
     const t = Math.min(swingT, 1);
@@ -369,8 +458,12 @@ function updateSword(dt) {
     if (swingT >= 1) swingT = -1;
   }
 
-  // 휘두르는 중이 아니면 움직임에 따라 달리기/대기
-  if (swingT < 0) playerPlay(move.lengthSq() > 0 ? pActions.run : pActions.idle);
+  // 휘두르는 중이 아니면: 방어 > 공중 > 달리기/대기 순서로 동작 선택
+  if (swingT < 0) {
+    if (isBlocking()) playerPlay(pActions.block);
+    else if (!onGround) playerPlay(airTime > 0.3 ? pActions.jumpIdle : pActions.jumpStart);
+    else playerPlay(move.lengthSq() > 0 ? pActions.run : pActions.idle);
+  }
 
   if (playerMixer) playerMixer.update(dt);
 }
@@ -393,17 +486,19 @@ function animate() {
   if (keys["KeyD"] || keys["ArrowRight"]) move.add(right);
   if (keys["KeyA"] || keys["ArrowLeft"]) move.sub(right);
 
+  const faceCamera = shiftLock || isFirstPerson() || isBlocking();
   if (move.lengthSq() > 0) {
     move.normalize();
-    player.position.addScaledVector(move, 6 * dt);
-    player.rotation.y = Math.atan2(move.x, move.z); // 가는 방향을 바라보기
+    player.position.addScaledVector(move, (isBlocking() ? 3 : 6) * dt); // 방어 중엔 느리게
+    if (!faceCamera) turnPlayerTo(Math.atan2(move.x, move.z), dt);       // 가는 방향으로 부드럽게 회전
   }
 
   player.position.x = THREE.MathUtils.clamp(player.position.x, -19, 19);
   player.position.z = THREE.MathUtils.clamp(player.position.z, -19, 19);
     // Shift 락이나 1인칭이면 캐릭터가 항상 카메라가 보는 쪽을 향함
-  if (shiftLock || isFirstPerson()) player.rotation.y = yaw + Math.PI;
-
+  if (shiftLock || isFirstPerson()) player.rotation.y = yaw + Math.PI;  // 바로 맞춤
+  else if (isBlocking()) turnPlayerTo(yaw + Math.PI, dt, 18);           // 방어 중엔 부드럽게 카메라 쪽으로
+  
   updateSword(dt);
 
   // --- 해골이 플레이어를 쫓아오기 + 공격 ---
@@ -419,7 +514,10 @@ function animate() {
       attackElapsed += dt;
       if (!attackHitDone && attackElapsed >= attackHitTime) {
         attackHitDone = true;
-        if (dist <= ATTACK_RANGE + 0.5) damagePlayer(ATTACK_DAMAGE); // 그새 도망갔으면 빗나감
+        if (dist <= ATTACK_RANGE + 0.5) {
+          if (blocksAttackFrom(skeleton.position.x, skeleton.position.z)) onBlocked(); // 방패로 막음
+          else damagePlayer(ATTACK_DAMAGE);
+        }
       }
       if (attackElapsed >= attackDuration) skeletonAttacking = false;
     } else if (dist <= ATTACK_RANGE && attackAction) {
@@ -444,7 +542,7 @@ function animate() {
   // 1인칭일 땐 위로도 볼 수 있게, 3인칭일 땐 땅 아래로 못 내려가게
   pitch = THREE.MathUtils.clamp(pitch, firstPerson ? -1.2 : 0.05, 1.4);
 
-  const head = new THREE.Vector3(player.position.x, EYE_HEIGHT, player.position.z);
+  const head = new THREE.Vector3(player.position.x, player.position.y + EYE_HEIGHT, player.position.z);
 
   if (firstPerson) {
     player.visible = false;
