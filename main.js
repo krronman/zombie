@@ -231,16 +231,28 @@ function respawnSkeleton() {
 }
 
 // 맞았을 때 잠깐 빨갛게 번쩍
-function setSkeletonGlow(hex) {
-  skeleton.traverse((child) => {
-    if (child.isMesh && child.material && child.material.emissive) {
-      child.material.emissive.setHex(hex);
-    }
-  });
-}
+
+// 맞았을 때 잠깐 빨갛게 번쩍 (끝나면 원래 발광색으로 복구)
+const originalEmissive = new Map(); // 재질 → 원래 발광색 (눈 안광 등)
+let flashTimer = null;
+
 function flashSkeleton() {
-  setSkeletonGlow(0xff0000);
-  setTimeout(() => skeleton && setSkeletonGlow(0x000000), 120);
+  skeleton.traverse((child) => {
+    if (!child.isMesh) return;
+    const mats = Array.isArray(child.material) ? child.material : [child.material];
+    mats.forEach((m) => {
+      if (!m.emissive) return;
+      // 처음 번쩍이기 전에 원래 색을 기억해 둠
+      if (!originalEmissive.has(m)) originalEmissive.set(m, m.emissive.clone());
+      m.emissive.setHex(0xff0000);
+    });
+  });
+  clearTimeout(flashTimer);
+  flashTimer = setTimeout(restoreSkeletonGlow, 120);
+}
+
+function restoreSkeletonGlow() {
+  originalEmissive.forEach((color, m) => m.emissive.copy(color));
 }
 
 // ===== 검 =====
