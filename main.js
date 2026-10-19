@@ -192,6 +192,7 @@ loader.load("models/skeleton.glb", (modelGltf) => {
       g.animations.find((a) => a.name === "Melee_1H_Attack_Chop") || g.animations[0];
     attackAction = mixer.clipAction(clip);
     attackAction.setLoop(THREE.LoopOnce, 1); // 한 번만 재생
+    attackAction.clampWhenFinished = true; // 끝나도 마지막 자세를 유지 (T자 방지)
     attackDuration = clip.duration;
     attackHitTime = clip.duration * 0.45;    // 모션의 45% 지점에서 피해가 들어감
   });
@@ -201,8 +202,14 @@ function startSkeletonAttack() {
   skeletonAttacking = true;
   attackElapsed = 0;
   attackHitDone = false;
-  if (walkAction) walkAction.stop();
   attackAction.reset().play();
+  if (walkAction) attackAction.crossFadeFrom(walkAction, 0.15, false); // 걷기에서 부드럽게 전환
+}
+
+function startWalking() {
+  if (!walkAction) return;
+  walkAction.reset().play();
+  if (attackAction) walkAction.crossFadeFrom(attackAction, 0.15, false); // 공격에서 부드럽게 전환
 }
 const SKELETON_SPEED = 2.5;   // 해골 속도 (플레이어는 6이라 도망칠 수 있어요)
 const STOP_DISTANCE = 1.5;    // 이만큼 가까워지면 멈춤
@@ -280,7 +287,6 @@ function startSwing() {
   if (swingT >= 0) return;
   swingT = 0;
   swingHit = false;
-  player.rotation.y = yaw + Math.PI; // 휘두를 때 카메라가 보는 쪽을 향함
 }
 
 // 왼쪽 클릭으로 휘두르기 (1인칭이면 커서 고정도 시도)
@@ -375,7 +381,7 @@ function animate() {
     } else if (dist > STOP_DISTANCE) {
       skeleton.position.x += (dx / dist) * SKELETON_SPEED * dt;
       skeleton.position.z += (dz / dist) * SKELETON_SPEED * dt;
-      if (walkAction && !walkAction.isRunning()) walkAction.reset().play();
+      if (walkAction && !walkAction.isRunning()) startWalking();
     } else if (walkAction) {
       walkAction.stop();
     }
